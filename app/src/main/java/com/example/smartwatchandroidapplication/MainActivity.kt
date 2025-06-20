@@ -127,24 +127,26 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         createNotificationChannel(this)
 
+        // Request notification permission on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
         }
 
         enableEdgeToEdge()
 
-        val startDestination = intent?.getStringExtra("destination") ?: "main" // 👈 pick destination
+        val launchDestination = intent?.getStringExtra("destination") ?: "main"
 
         setContent {
             val context = LocalContext.current
-            val scope = rememberCoroutineScope()
+            val navController = rememberNavController()
+            var startOnce by remember { mutableStateOf(true) }
 
+            // Start background polling for notifications
             LaunchedEffect(Unit) {
                 while (true) {
                     val results = fetchResultsFromApi()
                     val lastSeen = getLastSeenTimestamp(context)
 
-                    // Find the latest abnormal result
                     val latestAbnormal = results
                         .filter { it.result.equals("abnormal", ignoreCase = true) }
                         .maxByOrNull { it.time }
@@ -156,18 +158,15 @@ class MainActivity : ComponentActivity() {
                             message = "Age: ${latestAbnormal.age}, Gender: ${latestAbnormal.gender}, Emotion: ${latestAbnormal.emotion}"
                         )
 
-                        // Update the last seen timestamp immediately after showing notification
-                        setLastSeenTimestamp(context, latestAbnormal.time)
+                        // ❌ DO NOT update lastSeen here
+                        // setLastSeenTimestamp(context, latestAbnormal.time)
                     }
 
                     delay(30_000) // check every 30 seconds
                 }
             }
 
-
             SmartwatchAndroidApplicationTheme {
-                val navController = rememberNavController()
-
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                     topBar = {
@@ -176,7 +175,7 @@ class MainActivity : ComponentActivity() {
                 ) { innerPadding ->
                     NavHost(
                         navController = navController,
-                        startDestination = startDestination, // 👈 jump to "notification"
+                        startDestination = if (startOnce) launchDestination else "main",
                         modifier = Modifier.padding(innerPadding)
                     ) {
                         composable("main") { MainPage(navController) }
@@ -185,10 +184,16 @@ class MainActivity : ComponentActivity() {
                         composable("results") { ResultsPage(navController) }
                     }
                 }
+
+                // Only redirect to notification page ONCE
+                LaunchedEffect(Unit) {
+                    startOnce = false
+                }
             }
         }
     }
 }
+
 
 
 @Composable
@@ -242,37 +247,21 @@ fun MainPage(navController: NavHostController) {
         }
     }
 }
-
 @Composable
 fun NotificationPage(navController: NavHostController) {
     val context = LocalContext.current
     var results by remember { mutableStateOf<List<ResultItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var lastSeen by remember { mutableStateOf(getLastSeenTimestamp(context)) }
 
     LaunchedEffect(Unit) {
         try {
             val newResults = fetchResultsFromApi()
             results = newResults
             loading = false
-
-            // Update last seen timestamp to latest time in newResults
-            val latestTime = newResults.maxByOrNull { it.time }?.time
-            if (latestTime != null) {
-                setLastSeenTimestamp(context, latestTime)
-            }
-
-            // Remove this block so notification is not created here:
-            /*
-            val abnormalItem = newResults.firstOrNull { it.result.equals("abnormal", ignoreCase = true) }
-            if (abnormalItem != null) {
-                showNotification(
-                    context = context,
-                    title = "⚠️ Abnormal Result Detected",
-                    message = "Time: ${abnormalItem.time}\nAge: ${abnormalItem.age}, Gender: ${abnormalItem.gender}, Emotion: ${abnormalItem.emotion}"
-                )
-            }
-            */
+            // Do NOT update lastSeen here, so unread notifications stay visible until user marks them read
+            // lastSeen = newResults.maxByOrNull { it.time }?.time // removed
 
         } catch (e: Exception) {
             errorMessage = e.message
@@ -280,9 +269,9 @@ fun NotificationPage(navController: NavHostController) {
         }
     }
 
-
-    val lastSeen = getLastSeenTimestamp(context)
-    val (unread, read) = results.partition { lastSeen == null || it.time > lastSeen }
+    // Partition notifications based on lastSeen (null means all unread)
+    val unread = if (lastSeen == null) results else results.filter { it.time > lastSeen!! }
+    val read = if (lastSeen == null) emptyList() else results.filter { it.time <= lastSeen!! }
 
     Column(
         modifier = Modifier
@@ -294,6 +283,13 @@ fun NotificationPage(navController: NavHostController) {
             style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.align(Alignment.CenterHorizontally)
         )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Debug info
+        Text("Last seen timestamp: ${lastSeen ?: "None"}")
+        Text("Unread notifications: ${unread.size}")
+        Text("Read notifications: ${read.size}")
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -307,9 +303,9 @@ fun NotificationPage(navController: NavHostController) {
             )
         } else {
             LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(12.dp) // ✅ spacing between cards
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-            if (unread.isNotEmpty()) {
+                if (unread.isNotEmpty()) {
                     item {
                         Text("Unread", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     }
@@ -317,22 +313,42 @@ fun NotificationPage(navController: NavHostController) {
                         NotificationCard(item, isUnread = true)
                     }
                 }
-                item {
-                    Spacer(modifier = Modifier.height(16.dp)) // between Unread and Read
-                }
-
                 if (read.isNotEmpty()) {
                     item {
-                        Text("Read", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(top = 16.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Read", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     }
                     items(read) { item ->
                         NotificationCard(item)
+                    }
+                }
+                if (unread.isEmpty() && read.isEmpty()) {
+                    item {
+                        Text("No notifications found.", modifier = Modifier.align(Alignment.CenterHorizontally))
                     }
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        // Button to mark all unread as read (update lastSeen timestamp)
+        if (unread.isNotEmpty()) {
+            Button(
+                onClick = {
+                    val latestTime = results.maxByOrNull { it.time }?.time
+                    if (latestTime != null) {
+                        setLastSeenTimestamp(context, latestTime)
+                        lastSeen = latestTime
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Mark all as read")
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         Button(onClick = { navController.popBackStack() }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
             Text("Back")
