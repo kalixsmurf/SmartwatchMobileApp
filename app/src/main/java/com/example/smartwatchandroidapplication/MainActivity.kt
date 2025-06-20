@@ -30,7 +30,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import java.net.HttpURLConnection
 import java.net.URL
-
+import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -42,23 +42,50 @@ import androidx.navigation.compose.composable
 import kotlinx.coroutines.launch
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.os.Build
 import androidx.compose.ui.platform.LocalContext
 
 
 import android.content.Context
+import android.content.Intent
 import androidx.core.app.NotificationCompat
 
 
 fun showNotification(context: Context, title: String, message: String) {
+    val intent = Intent(context, MainActivity::class.java).apply {
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        putExtra("destination", "notification") // 👈 pass your target screen
+    }
+
+    val pendingIntent = PendingIntent.getActivity(
+        context,
+        0,
+        intent,
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+    )
+
     val builder = NotificationCompat.Builder(context, "smartwatch_channel")
-        .setSmallIcon(R.drawable.ic_launcher_foreground) // replace with your icon
+        .setSmallIcon(R.drawable.ic_launcher_foreground)
         .setContentTitle(title)
         .setContentText(message)
-        .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+        .setContentIntent(pendingIntent)
+        .setAutoCancel(true)
+        .setPriority(NotificationCompat.PRIORITY_HIGH)
 
-    val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    val notificationManager =
+        context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     notificationManager.notify(1001, builder.build())
+}
+
+fun getLastSeenTimestamp(context: Context): String? {
+    val prefs = context.getSharedPreferences("notif_storage", Context.MODE_PRIVATE)
+    return prefs.getString("last_seen_timestamp", null)
+}
+
+fun setLastSeenTimestamp(context: Context, timestamp: String) {
+    val prefs = context.getSharedPreferences("notif_storage", Context.MODE_PRIVATE)
+    prefs.edit().putString("last_seen_timestamp", timestamp).apply()
 }
 
 
@@ -99,25 +126,57 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         createNotificationChannel(this)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
         }
+
         enableEdgeToEdge()
+
+        val startDestination = intent?.getStringExtra("destination") ?: "main" // 👈 pick destination
+
         setContent {
+            val context = LocalContext.current
+            val scope = rememberCoroutineScope()
+
+            LaunchedEffect(Unit) {
+                while (true) {
+                    val results = fetchResultsFromApi()
+                    val lastSeen = getLastSeenTimestamp(context)
+
+                    // Find the latest abnormal result
+                    val latestAbnormal = results
+                        .filter { it.result.equals("abnormal", ignoreCase = true) }
+                        .maxByOrNull { it.time }
+
+                    if (latestAbnormal != null && (lastSeen == null || latestAbnormal.time > lastSeen)) {
+                        showNotification(
+                            context = context,
+                            title = "⚠️ Abnormal Result Detected",
+                            message = "Age: ${latestAbnormal.age}, Gender: ${latestAbnormal.gender}, Emotion: ${latestAbnormal.emotion}"
+                        )
+
+                        // Update the last seen timestamp immediately after showing notification
+                        setLastSeenTimestamp(context, latestAbnormal.time)
+                    }
+
+                    delay(30_000) // check every 30 seconds
+                }
+            }
+
+
             SmartwatchAndroidApplicationTheme {
                 val navController = rememberNavController()
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                     topBar = {
-                        TopAppBar(
-                            title = { Text("Smartwatch Manager") }
-                        )
+                        TopAppBar(title = { Text("Smartwatch Manager") })
                     }
                 ) { innerPadding ->
                     NavHost(
                         navController = navController,
-                        startDestination = "main",
+                        startDestination = startDestination, // 👈 jump to "notification"
                         modifier = Modifier.padding(innerPadding)
                     ) {
                         composable("main") { MainPage(navController) }
@@ -130,6 +189,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
 
 @Composable
 fun MainPage(navController: NavHostController) {
@@ -185,7 +245,7 @@ fun MainPage(navController: NavHostController) {
 
 @Composable
 fun NotificationPage(navController: NavHostController) {
-    val context = LocalContext.current // <-- this line is key
+    val context = LocalContext.current
     var results by remember { mutableStateOf<List<ResultItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -196,10 +256,15 @@ fun NotificationPage(navController: NavHostController) {
             results = newResults
             loading = false
 
-            // ✅ Look for an abnormal result
-            val abnormalItem = newResults.firstOrNull { it.result.equals("abnormal", ignoreCase = true) }
+            // Update last seen timestamp to latest time in newResults
+            val latestTime = newResults.maxByOrNull { it.time }?.time
+            if (latestTime != null) {
+                setLastSeenTimestamp(context, latestTime)
+            }
 
-            // ✅ If found, trigger notification
+            // Remove this block so notification is not created here:
+            /*
+            val abnormalItem = newResults.firstOrNull { it.result.equals("abnormal", ignoreCase = true) }
             if (abnormalItem != null) {
                 showNotification(
                     context = context,
@@ -207,6 +272,7 @@ fun NotificationPage(navController: NavHostController) {
                     message = "Time: ${abnormalItem.time}\nAge: ${abnormalItem.age}, Gender: ${abnormalItem.gender}, Emotion: ${abnormalItem.emotion}"
                 )
             }
+            */
 
         } catch (e: Exception) {
             errorMessage = e.message
@@ -214,6 +280,9 @@ fun NotificationPage(navController: NavHostController) {
         }
     }
 
+
+    val lastSeen = getLastSeenTimestamp(context)
+    val (unread, read) = results.partition { lastSeen == null || it.time > lastSeen }
 
     Column(
         modifier = Modifier
@@ -238,10 +307,27 @@ fun NotificationPage(navController: NavHostController) {
             )
         } else {
             LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp) // ✅ spacing between cards
             ) {
-                items(results) { item ->
-                    NotificationCard(item)
+            if (unread.isNotEmpty()) {
+                    item {
+                        Text("Unread", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    }
+                    items(unread) { item ->
+                        NotificationCard(item, isUnread = true)
+                    }
+                }
+                item {
+                    Spacer(modifier = Modifier.height(16.dp)) // between Unread and Read
+                }
+
+                if (read.isNotEmpty()) {
+                    item {
+                        Text("Read", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(top = 16.dp))
+                    }
+                    items(read) { item ->
+                        NotificationCard(item)
+                    }
                 }
             }
         }
@@ -254,17 +340,18 @@ fun NotificationPage(navController: NavHostController) {
     }
 }
 
+
 @Composable
-fun NotificationCard(item: ResultItem) {
+fun NotificationCard(item: ResultItem, isUnread: Boolean = false) {
+    val bgColor = if (isUnread) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+
     Card(
-        modifier = Modifier
-            .fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(4.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        colors = CardDefaults.cardColors(containerColor = bgColor)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text("Time: ${item.time}", fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(4.dp))
             Text("Age: ${item.age}")
             Text("Gender: ${item.gender}")
             Text("Emotion: ${item.emotion}")
@@ -272,6 +359,7 @@ fun NotificationCard(item: ResultItem) {
         }
     }
 }
+
 
 
 @Composable
