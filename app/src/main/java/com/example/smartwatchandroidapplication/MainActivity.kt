@@ -36,6 +36,28 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import kotlinx.coroutines.launch
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.os.Build
+import androidx.compose.ui.platform.LocalContext
+
+
+import android.content.Context
+import androidx.core.app.NotificationCompat
+
+
+fun showNotification(context: Context, title: String, message: String) {
+    val builder = NotificationCompat.Builder(context, "smartwatch_channel")
+        .setSmallIcon(R.drawable.ic_launcher_foreground) // replace with your icon
+        .setContentTitle(title)
+        .setContentText(message)
+        .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+
+    val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    notificationManager.notify(1001, builder.build())
+}
+
+
 
 data class ResultItem(
     val time: String,
@@ -45,9 +67,30 @@ data class ResultItem(
     val result: String
 )
 
+
+fun createNotificationChannel(context: Context) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val channel = NotificationChannel(
+            "smartwatch_channel", // ID
+            "Smartwatch Alerts",  // Name shown to user
+            NotificationManager.IMPORTANCE_DEFAULT
+        )
+        channel.description = "Shows notifications from the Smartwatch App"
+
+        val notificationManager: NotificationManager =
+            context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.createNotificationChannel(channel)
+    }
+}
+
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        createNotificationChannel(this)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
         enableEdgeToEdge()
         setContent {
             SmartwatchAndroidApplicationTheme {
@@ -67,7 +110,7 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.padding(innerPadding)
                     ) {
                         composable("main") { MainPage(navController) }
-                        composable("profile") { ProfilePage(navController) }
+                        composable("notification") { NotificationPage(navController) }
                         composable("configuration") { ConfigurationPage(navController) }
                         composable("results") { ResultsPage(navController) }
                     }
@@ -97,12 +140,12 @@ fun MainPage(navController: NavHostController) {
         )
 
         ElevatedButton(
-            onClick = { navController.navigate("profile") },
+            onClick = { navController.navigate("notification") },
             modifier = Modifier
                 .width(buttonWidth)
                 .height(56.dp),
         ) {
-            Text("Profile")
+            Text("Notification")
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -130,9 +173,95 @@ fun MainPage(navController: NavHostController) {
 }
 
 @Composable
-fun ProfilePage(navController: NavHostController) {
-    CenteredScreen(title = "Profile Page", navController)
+fun NotificationPage(navController: NavHostController) {
+    val context = LocalContext.current // <-- this line is key
+    var results by remember { mutableStateOf<List<ResultItem>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        try {
+            val newResults = fetchResultsFromApi()
+            results = newResults
+            loading = false
+
+            // ✅ Look for an abnormal result
+            val abnormalItem = newResults.firstOrNull { it.result.equals("abnormal", ignoreCase = true) }
+
+            // ✅ If found, trigger notification
+            if (abnormalItem != null) {
+                showNotification(
+                    context = context,
+                    title = "⚠️ Abnormal Result Detected",
+                    message = "Time: ${abnormalItem.time}\nAge: ${abnormalItem.age}, Gender: ${abnormalItem.gender}, Emotion: ${abnormalItem.emotion}"
+                )
+            }
+
+        } catch (e: Exception) {
+            errorMessage = e.message
+            loading = false
+        }
+    }
+
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Text(
+            text = "Notifications",
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (loading) {
+            CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+        } else if (!errorMessage.isNullOrEmpty()) {
+            Text(
+                text = errorMessage ?: "An error occurred",
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
+        } else {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(results) { item ->
+                    NotificationCard(item)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(onClick = { navController.popBackStack() }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+            Text("Back")
+        }
+    }
 }
+
+@Composable
+fun NotificationCard(item: ResultItem) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(4.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text("Time: ${item.time}", fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text("Age: ${item.age}")
+            Text("Gender: ${item.gender}")
+            Text("Emotion: ${item.emotion}")
+            Text("Result: ${item.result}")
+        }
+    }
+}
+
 
 @Composable
 fun ConfigurationPage(navController: NavHostController) {
