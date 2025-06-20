@@ -31,6 +31,10 @@ import org.json.JSONArray
 import java.net.HttpURLConnection
 import java.net.URL
 
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.compose.NavHost
@@ -43,6 +47,13 @@ data class ResultItem(
     val gender: String,
     val emotion: String,
     val result: String
+)
+
+@Serializable
+data class ConfigurationPayload(
+    val primaryPhone: String,
+    val secondaryPhone: String,
+    val filters: Map<String, Int>
 )
 
 class MainActivity : ComponentActivity() {
@@ -136,7 +147,201 @@ fun ProfilePage(navController: NavHostController) {
 
 @Composable
 fun ConfigurationPage(navController: NavHostController) {
-    CenteredScreen(title = "Configuration Page", navController)
+    val genderFilters = listOf("Male", "Female")
+    val emotionFilters = listOf("Angry", "Sad", "Neutral", "Calm", "Happy", "Fear", "Disgust", "Surprised")
+    val ageFilters = listOf("20s", "30s", "40s", "50s", "60s", "70s", "80s")
+
+    val genderState = remember { mutableStateMapOf<String, Int>().apply { genderFilters.forEach { put(it, 0) } } }
+    val emotionState = remember { mutableStateMapOf<String, Int>().apply { emotionFilters.forEach { put(it, 0) } } }
+    val ageState = remember { mutableStateMapOf<String, Int>().apply { ageFilters.forEach { put(it, 0) } } }
+
+    var saveStatus by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var debugInfo by remember { mutableStateOf<String?>(null) }
+
+    val coroutineScope = rememberCoroutineScope()
+
+    suspend fun getCurrentConfig(): ConfigurationPayload? = withContext(Dispatchers.IO) {
+        try {
+            val url = URL("https://smartwatchforchildsafety-bffrfaahgtahb9bg.italynorth-01.azurewebsites.net/api/smartwatch/config")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("Accept", "application/json")
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+            conn.connect()
+
+            val response = conn.inputStream.bufferedReader().readText()
+            debugInfo = "GET Response:\n$response"
+
+            Json.decodeFromString<ConfigurationPayload>(response)
+        } catch (e: Exception) {
+            debugInfo = "GET Exception:\n${e.stackTraceToString()}"
+            null
+        }
+    }
+
+    suspend fun postConfig(payload: ConfigurationPayload): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val url = URL("https://smartwatchforchildsafety-bffrfaahgtahb9bg.italynorth-01.azurewebsites.net/api/smartwatch/config")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json")
+
+            val json = Json.encodeToString(payload)
+            conn.outputStream.bufferedWriter().use { it.write(json) }
+            conn.connect()
+
+            val responseCode = conn.responseCode
+            val responseMsg = conn.inputStream.bufferedReader().readText()
+            debugInfo = "POST Response ($responseCode):\n$responseMsg\n\nPayload:\n$json"
+
+            responseCode in 200..299
+        } catch (e: Exception) {
+            debugInfo = "POST Exception:\n${e.stackTraceToString()}"
+            false
+        }
+    }
+
+    // Fetch current config on page load
+    LaunchedEffect(Unit) {
+        loading = true
+        debugInfo = "Fetching configuration from server..."
+        val config = getCurrentConfig()
+        loading = false
+
+        config?.let {
+            it.filters.forEach { (key, value) ->
+                when {
+                    genderState.containsKey(key) -> genderState[key] = value
+                    emotionState.containsKey(key) -> emotionState[key] = value
+                    ageState.containsKey(key) -> ageState[key] = value
+                }
+            }
+            saveStatus = "Loaded configuration from server."
+        } ?: run {
+            saveStatus = "Error: Failed to load configuration."
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text("Configuration", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(bottom = 24.dp))
+
+        FilterGroup("Gender Filters", genderState)
+        Spacer(modifier = Modifier.height(16.dp))
+        FilterGroup("Emotion Filters", emotionState)
+        Spacer(modifier = Modifier.height(16.dp))
+        FilterGroup("Age Filters", ageState)
+        Spacer(modifier = Modifier.height(24.dp))
+
+        if (loading) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+
+        saveStatus?.let {
+            Text(
+                text = it,
+                color = if (it.startsWith("Success")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        }
+
+        debugInfo?.let {
+            Text(
+                text = it,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .padding(8.dp)
+                    .fillMaxWidth(),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            )
+        }
+
+        Button(
+            onClick = {
+                val allFilters = genderState + emotionState + ageState
+                val payload = ConfigurationPayload(
+                    primaryPhone = "-1",
+                    secondaryPhone = "-1",
+                    filters = allFilters
+                )
+
+                loading = true
+                saveStatus = null
+                debugInfo = null
+
+                coroutineScope.launch {
+                    val success = postConfig(payload)
+                    loading = false
+                    saveStatus = if (success) "Success: Configuration saved!" else "Error: Failed to save configuration."
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !loading
+        ) {
+            Text("Save")
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        Button(
+            onClick = { navController.popBackStack() },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Back")
+        }
+    }
+}
+
+@Composable
+fun FilterGroup(
+    title: String,
+    filters: MutableMap<String, Int>
+) {
+    Column {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        filters.forEach { (name, value) ->
+            FilterCheckbox(name, value == 1) { checked ->
+                filters[name] = if (checked) 1 else 0
+            }
+        }
+    }
+}
+
+@Composable
+fun FilterCheckbox(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = CheckboxDefaults.colors(
+                checkedColor = MaterialTheme.colorScheme.primary
+            )
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(text = label)
+    }
 }
 
 @Composable
