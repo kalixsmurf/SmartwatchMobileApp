@@ -88,7 +88,6 @@ class SplashActivity : ComponentActivity() {
         setContent {
             SmartwatchAndroidApplicationTheme {
                 SplashScreen {
-                    // Navigate to MainActivity after splash
                     startActivity(Intent(this@SplashActivity, MainActivity::class.java))
                     finish()
                 }
@@ -99,84 +98,35 @@ class SplashActivity : ComponentActivity() {
 
 @Composable
 fun SplashScreen(onSplashComplete: () -> Unit) {
-    var startAnimation by remember { mutableStateOf(false) }
-
-    // Auto-start animation and navigate after delay
     LaunchedEffect(Unit) {
-        startAnimation = true
-        delay(4000) // Show splash for 4 seconds
+        delay(3000)
         onSplashComplete()
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color(0xFF667eea),
-                        Color(0xFF764ba2)
-                    ),
-                    start = Offset(0f, 0f),
-                    end = Offset(1000f, 1000f)
-                )
-            )
+            .background(Color(0xFFB3E5FC)), // 🎨 Baby blue
+        contentAlignment = Alignment.Center
     ) {
-        // Animated background particles
-        AnimatedBackgroundParticles()
-
-        // Main content
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            // App icon with bounce animation
-            AnimatedAppIcon(startAnimation)
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Main title with gradient animation
-            AnimatedGradientText(
-                text = "Smartwatch for\nChild Safety Project",
-                startAnimation = startAnimation
-            )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            AnimatedAppIcon()
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Quote positioned right below the main text, aligned to the right
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.End
-            ) {
-                Text(
-                    text = "Every child is a color.",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Light,
-                    color = Color.White.copy(alpha = 0.9f),
-                    fontStyle = FontStyle.Italic,
-                    textAlign = TextAlign.End
-                )
-
-                AnimatedSignature(startAnimation)
-            }
-        }
-
-        // Loading dots at bottom center
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 80.dp)
-        ) {
-            LoadingDots()
+            Text(
+                text = "Smartwatch for Child Safety",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }
 
 @Composable
-fun AnimatedAppIcon(startAnimation: Boolean) {
+fun AnimatedAppIcon() {
     val bounceAnimation = rememberInfiniteTransition(label = "bounce")
     val bounceOffset by bounceAnimation.animateFloat(
         initialValue = 0f,
@@ -189,7 +139,7 @@ fun AnimatedAppIcon(startAnimation: Boolean) {
     )
 
     val scaleAnimation by animateFloatAsState(
-        targetValue = if (startAnimation) 1f else 0f,
+        targetValue = 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessLow
@@ -224,169 +174,7 @@ fun AnimatedAppIcon(startAnimation: Boolean) {
     }
 }
 
-@Composable
-fun AnimatedGradientText(text: String, startAnimation: Boolean) {
-    val infiniteTransition = rememberInfiniteTransition(label = "gradient")
-    val gradientOffset by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(4000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "gradient_offset"
-    )
 
-    val textAnimation by animateFloatAsState(
-        targetValue = if (startAnimation) 1f else 0f,
-        animationSpec = tween(1000, delayMillis = 500),
-        label = "text_alpha"
-    )
-
-    val textMeasurer = rememberTextMeasurer()
-
-    Canvas(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(140.dp)
-            .graphicsLayer { alpha = textAnimation }
-    ) {
-        // Softer, more pastel colors
-        val colors = listOf(
-            Color(0xFFFFB3BA), // Soft pink
-            Color(0xFFFFDFBA), // Soft peach
-            Color(0xFFFFFFBA), // Soft yellow
-            Color(0xFFBAFFBA), // Soft green
-            Color(0xFFBAE1FF), // Soft blue
-            Color(0xFFE1BAFF), // Soft purple
-            Color(0xFFFFBAE1), // Soft magenta
-            Color(0xFFBAFFE1), // Soft mint
-            Color(0xFFE1FFBA), // Soft lime
-            Color(0xFFFFE1BA)  // Soft orange
-        )
-
-        val brush = Brush.linearGradient(
-            colors = colors,
-            start = Offset(size.width * gradientOffset, 0f),
-            end = Offset(size.width * (gradientOffset + 0.3f), size.height)
-        )
-
-        val textStyle = TextStyle(
-            fontSize = 32.sp,
-            fontWeight = FontWeight.ExtraBold,
-            textAlign = TextAlign.Center,
-            brush = brush
-        )
-
-        val textLayoutResult = textMeasurer.measure(
-            text = text,
-            style = textStyle
-        )
-
-        drawText(
-            textLayoutResult = textLayoutResult,
-            topLeft = Offset(
-                (size.width - textLayoutResult.size.width) / 2,
-                (size.height - textLayoutResult.size.height) / 2
-            )
-        )
-    }
-}
-
-@Composable
-fun AnimatedSignature(startAnimation: Boolean) {
-    val signatureAnimation by animateFloatAsState(
-        targetValue = if (startAnimation) 1f else 0f,
-        animationSpec = tween(1000, delayMillis = 2000),
-        label = "signature"
-    )
-
-    Text(
-        text = "~Team",
-        fontSize = 14.sp,
-        fontWeight = FontWeight.Normal,
-        color = Color.White.copy(alpha = 0.7f * signatureAnimation),
-        textAlign = TextAlign.End,
-        modifier = Modifier
-            .padding(top = 8.dp)
-            .graphicsLayer {
-                alpha = signatureAnimation
-                translationY = (1f - signatureAnimation) * 20f
-            }
-    )
-}
-
-@Composable
-fun LoadingDots() {
-    val infiniteTransition = rememberInfiniteTransition(label = "loading")
-
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        repeat(3) { index ->
-            val scale by infiniteTransition.animateFloat(
-                initialValue = 0.8f,
-                targetValue = 1.2f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(600, delayMillis = index * 200),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "dot_$index"
-            )
-
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                    }
-                    .background(
-                        Color.White.copy(alpha = 0.6f),
-                        shape = androidx.compose.foundation.shape.CircleShape
-                    )
-            )
-        }
-    }
-}
-
-@Composable
-fun AnimatedBackgroundParticles() {
-    val particleCount = 12
-    val infiniteTransition = rememberInfiniteTransition(label = "particles")
-
-    // Create animated values for all particles directly in composable context
-    val particleAnimations = (0 until particleCount).map { index ->
-        infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(
-                    durationMillis = (4000 + index * 500),
-                    easing = LinearEasing
-                ),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "particle_$index"
-        )
-    }
-
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        particleAnimations.forEachIndexed { index, progressState ->
-            val progress = progressState.value
-            val x = (size.width * (index + 1) / (particleCount + 1))
-            val y = size.height * (1 - progress)
-            val alpha = if (progress < 0.1f || progress > 0.9f) 0f else 0.3f
-
-            drawCircle(
-                color = Color.White.copy(alpha = alpha),
-                radius = 4f,
-                center = Offset(x, y)
-            )
-        }
-    }
-}
 
 class AbnormalResultService : Service() {
 
