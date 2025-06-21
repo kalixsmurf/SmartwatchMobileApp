@@ -68,12 +68,14 @@ class AbnormalResultService : Service() {
         createNotificationChannel()
 
         val notification = Notification.Builder(this, "smartwatch_channel")
-            .setContentTitle("Smartwatch App Running")
-            .setContentText("Monitoring for abnormal results...")
+            .setContentTitle("")
+            .setContentText("")
             .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setPriority(Notification.PRIORITY_MIN) // Lower priority
+            .setOngoing(false)
             .build()
 
-        startForeground(1, notification)
+        //startForeground(1, notification)
 
         startPollingLoop()
     }
@@ -185,10 +187,13 @@ data class ConfigurationPayload(
 fun createNotificationChannel(context: Context) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         val channel = NotificationChannel(
-            "smartwatch_channel", // ID
-            "Smartwatch Alerts",  // Name shown to user
-            NotificationManager.IMPORTANCE_DEFAULT
+            "smartwatch_channel",
+            "Smartwatch Alerts",
+            NotificationManager.IMPORTANCE_LOW // instead of IMPORTANCE_DEFAULT
         )
+        channel.setShowBadge(false)
+        channel.setSound(null, null)
+
         channel.description = "Shows notifications from the Smartwatch App"
 
         val notificationManager: NotificationManager =
