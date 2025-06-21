@@ -2,6 +2,7 @@
 
 package com.example.smartwatchandroidapplication
 
+import android.app.Notification
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -43,19 +44,97 @@ import kotlinx.coroutines.launch
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.Service
 import android.os.Build
 import androidx.compose.ui.platform.LocalContext
 
 
 import android.content.Context
 import android.content.Intent
+import android.os.IBinder
+import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.*
 
+class AbnormalResultService : Service() {
+
+    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+
+        val notification = Notification.Builder(this, "smartwatch_channel")
+            .setContentTitle("Smartwatch App Running")
+            .setContentText("Monitoring for abnormal results...")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .build()
+
+        startForeground(1, notification)
+
+        startPollingLoop()
+    }
+
+    private fun startPollingLoop() {
+        val context = this
+        serviceScope.launch {
+            while (true) {
+                try {
+                    val results = fetchResultsFromApi()
+
+                    val latestAbnormal = results
+                        .filter { it.result.equals("abnormal", ignoreCase = true) }
+                        .maxByOrNull { it.time }
+
+                    val lastSeen = getLastSeenTimestamp(context)
+
+                    if (latestAbnormal != null && (lastSeen == null || latestAbnormal.time > lastSeen)) {
+                        showNotification(
+                            context = context,
+                            title = "⚠️ Abnormal Result Detected",
+                            message = "Age: ${latestAbnormal.age}, Gender: ${latestAbnormal.gender}, Emotion: ${latestAbnormal.emotion}"
+                        )
+
+                        // ❗ Optional: Uncomment to auto-mark as seen
+                        // setLastSeenTimestamp(context, latestAbnormal.time)
+                    }
+
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
+                delay(30_000)
+            }
+        }
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onDestroy() {
+        super.onDestroy()
+        serviceScope.cancel()
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                "smartwatch_channel",
+                "Smartwatch Alerts",
+                NotificationManager.IMPORTANCE_DEFAULT
+            )
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+    }
+}
 
 fun showNotification(context: Context, title: String, message: String) {
     val intent = Intent(context, MainActivity::class.java).apply {
         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        putExtra("destination", "notification") // 👈 pass your target screen
+        putExtra("destination", "notification")
     }
 
     val pendingIntent = PendingIntent.getActivity(
@@ -88,8 +167,6 @@ fun setLastSeenTimestamp(context: Context, timestamp: String) {
     prefs.edit().putString("last_seen_timestamp", timestamp).apply()
 }
 
-
-
 data class ResultItem(
     val time: String,
     val age: String,
@@ -104,7 +181,6 @@ data class ConfigurationPayload(
     val secondaryPhone: String,
     val filters: Map<String, Int>
 )
-
 
 fun createNotificationChannel(context: Context) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -132,6 +208,11 @@ class MainActivity : ComponentActivity() {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
         }
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(Intent(this, AbnormalResultService::class.java))
+        } else {
+            startService(Intent(this, AbnormalResultService::class.java))
+        }
         enableEdgeToEdge()
 
         val launchDestination = intent?.getStringExtra("destination") ?: "main"
@@ -140,31 +221,6 @@ class MainActivity : ComponentActivity() {
             val context = LocalContext.current
             val navController = rememberNavController()
             var startOnce by remember { mutableStateOf(true) }
-
-            // Start background polling for notifications
-            LaunchedEffect(Unit) {
-                while (true) {
-                    val results = fetchResultsFromApi()
-                    val lastSeen = getLastSeenTimestamp(context)
-
-                    val latestAbnormal = results
-                        .filter { it.result.equals("abnormal", ignoreCase = true) }
-                        .maxByOrNull { it.time }
-
-                    if (latestAbnormal != null && (lastSeen == null || latestAbnormal.time > lastSeen)) {
-                        showNotification(
-                            context = context,
-                            title = "⚠️ Abnormal Result Detected",
-                            message = "Age: ${latestAbnormal.age}, Gender: ${latestAbnormal.gender}, Emotion: ${latestAbnormal.emotion}"
-                        )
-
-                        // ❌ DO NOT update lastSeen here
-                        // setLastSeenTimestamp(context, latestAbnormal.time)
-                    }
-
-                    delay(30_000) // check every 30 seconds
-                }
-            }
 
             SmartwatchAndroidApplicationTheme {
                 Scaffold(
@@ -194,7 +250,10 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-
+fun cancelNotification(context: Context, notificationId: Int = 1001) {
+    val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    notificationManager.cancel(notificationId)
+}
 
 @Composable
 fun MainPage(navController: NavHostController) {
@@ -247,6 +306,7 @@ fun MainPage(navController: NavHostController) {
         }
     }
 }
+
 @Composable
 fun NotificationPage(navController: NavHostController) {
     val context = LocalContext.current
@@ -258,14 +318,24 @@ fun NotificationPage(navController: NavHostController) {
     LaunchedEffect(Unit) {
         try {
             val newResults = fetchResultsFromApi()
-            results = newResults
+            results = newResults.filter { it.result.equals("abnormal", ignoreCase = true) }
             loading = false
             // Do NOT update lastSeen here, so unread notifications stay visible until user marks them read
             // lastSeen = newResults.maxByOrNull { it.time }?.time // removed
-
+            cancelNotification(context, 1001)
         } catch (e: Exception) {
             errorMessage = e.message
             loading = false
+        }
+    }
+
+    // Automatically mark notifications as read when leaving the page
+    DisposableEffect(Unit) {
+        onDispose {
+            val latestTime = results.maxByOrNull { it.time }?.time
+            if (latestTime != null) {
+                setLastSeenTimestamp(context, latestTime)
+            }
         }
     }
 
