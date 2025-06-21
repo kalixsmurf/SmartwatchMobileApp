@@ -21,6 +21,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.smartwatchandroidapplication.ui.theme.SmartwatchAndroidApplicationTheme
 
+import android.util.Log
+import android.widget.Toast
+
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -58,6 +61,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.*
 
+import android.media.MediaPlayer
+
+import androidx.compose.foundation.clickable
+import java.io.File
+import java.io.FileOutputStream
+import java.net.URLEncoder
+
+
 class AbnormalResultService : Service() {
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -68,14 +79,14 @@ class AbnormalResultService : Service() {
         createNotificationChannel()
 
         val notification = Notification.Builder(this, "smartwatch_channel")
-            .setContentTitle("")
-            .setContentText("")
+            .setContentTitle("Child is Safe")
+            .setContentText("Child Safety Monitoring is Enabled")
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setPriority(Notification.PRIORITY_MIN) // Lower priority
             .setOngoing(false)
             .build()
 
-        //startForeground(1, notification)
+        startForeground(1, notification)
 
         startPollingLoop()
     }
@@ -97,7 +108,8 @@ class AbnormalResultService : Service() {
                         showNotification(
                             context = context,
                             title = "⚠️ Abnormal Result Detected",
-                            message = "Age: ${latestAbnormal.age}, Gender: ${latestAbnormal.gender}, Emotion: ${latestAbnormal.emotion}"
+                            message = "Age: ${latestAbnormal.age}, Gender: ${latestAbnormal.gender}, Emotion: ${latestAbnormal.emotion}",
+                            timestamp = latestAbnormal.time // 👈 add this
                         )
 
                         // ❗ Optional: Uncomment to auto-mark as seen
@@ -133,10 +145,11 @@ class AbnormalResultService : Service() {
     }
 }
 
-fun showNotification(context: Context, title: String, message: String) {
+fun showNotification(context: Context, title: String, message: String, timestamp: String) {
     val intent = Intent(context, MainActivity::class.java).apply {
         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         putExtra("destination", "notification")
+        putExtra("abnormal_timestamp", timestamp) // 👈 Add timestamp
     }
 
     val pendingIntent = PendingIntent.getActivity(
@@ -158,6 +171,7 @@ fun showNotification(context: Context, title: String, message: String) {
         context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     notificationManager.notify(1001, builder.build())
 }
+
 
 fun getLastSeenTimestamp(context: Context): String? {
     val prefs = context.getSharedPreferences("notif_storage", Context.MODE_PRIVATE)
@@ -221,6 +235,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val launchDestination = intent?.getStringExtra("destination") ?: "main"
+        val abnormalTimestamp = intent?.getStringExtra("abnormal_timestamp") // 👈 Added line
 
         setContent {
             val context = LocalContext.current
@@ -240,7 +255,7 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.padding(innerPadding)
                     ) {
                         composable("main") { MainPage(navController) }
-                        composable("notification") { NotificationPage(navController) }
+                        composable("notification") { NotificationPage(navController, abnormalTimestamp) }
                         composable("configuration") { ConfigurationPage(navController) }
                         composable("results") { ResultsPage(navController) }
                     }
@@ -312,8 +327,10 @@ fun MainPage(navController: NavHostController) {
     }
 }
 
+
+
 @Composable
-fun NotificationPage(navController: NavHostController) {
+fun NotificationPage(navController: NavHostController, abnormalTimestamp: String?) {
     val context = LocalContext.current
     var results by remember { mutableStateOf<List<ResultItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -333,6 +350,17 @@ fun NotificationPage(navController: NavHostController) {
             loading = false
         }
     }
+
+    //val mediaPlayer = remember { MediaPlayer() }
+    var audioUrl by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(abnormalTimestamp) {
+        if (!abnormalTimestamp.isNullOrEmpty()) {
+            playAudioForTimestamp(context, abnormalTimestamp)
+        }
+    }
+
+
 
     // Automatically mark notifications as read when leaving the page
     DisposableEffect(Unit) {
@@ -434,10 +462,15 @@ fun NotificationPage(navController: NavHostController) {
 
 @Composable
 fun NotificationCard(item: ResultItem, isUnread: Boolean = false) {
+    val context = LocalContext.current
     val bgColor = if (isUnread) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                playAudioForTimestamp(context, item.time)
+            },
         elevation = CardDefaults.cardElevation(4.dp),
         colors = CardDefaults.cardColors(containerColor = bgColor)
     ) {
@@ -447,6 +480,47 @@ fun NotificationCard(item: ResultItem, isUnread: Boolean = false) {
             Text("Gender: ${item.gender}")
             Text("Emotion: ${item.emotion}")
             Text("Result: ${item.result}")
+        }
+    }
+}
+
+
+fun playAudioForTimestamp(context: Context, timestamp: String) {
+    CoroutineScope(Dispatchers.IO).launch {
+        try {
+            val url = URL("https://smartwatchforchildsafety-bffrfaahgtahb9bg.italynorth-01.azurewebsites.net/api/smartwatch/audio?timestamp=${URLEncoder.encode(timestamp, "UTF-8")}")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+            conn.connect()
+
+            if (conn.responseCode != 200) {
+                Log.e("AudioDownload", "Failed to fetch audio. HTTP ${conn.responseCode}")
+                return@launch
+            }
+
+            // Save to a temporary file
+            val tempFile = File.createTempFile("abnormal_audio", ".wav", context.cacheDir)
+            conn.inputStream.use { input ->
+                FileOutputStream(tempFile).use { output ->
+                    input.copyTo(output)
+                }
+            }
+
+            // Play the audio on the main thread
+            withContext(Dispatchers.Main) {
+                val mediaPlayer = MediaPlayer()
+                mediaPlayer.setDataSource(tempFile.absolutePath)
+                mediaPlayer.prepare()
+                mediaPlayer.start()
+            }
+
+        } catch (e: Exception) {
+            e.printStackTrace()
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "Failed to play audio", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 }
