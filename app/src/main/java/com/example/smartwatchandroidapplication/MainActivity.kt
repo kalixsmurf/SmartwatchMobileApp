@@ -51,7 +51,6 @@ import android.app.Service
 import android.os.Build
 import androidx.compose.ui.platform.LocalContext
 
-
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
@@ -64,10 +63,330 @@ import kotlinx.coroutines.*
 import android.media.MediaPlayer
 
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextAlign
 import java.io.File
 import java.io.FileOutputStream
 import java.net.URLEncoder
 
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.*
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
+
+class SplashActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        setContent {
+            SmartwatchAndroidApplicationTheme {
+                SplashScreen {
+                    // Navigate to MainActivity after splash
+                    startActivity(Intent(this@SplashActivity, MainActivity::class.java))
+                    finish()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SplashScreen(onSplashComplete: () -> Unit) {
+    var startAnimation by remember { mutableStateOf(false) }
+
+    // Auto-start animation and navigate after delay
+    LaunchedEffect(Unit) {
+        startAnimation = true
+        delay(4000) // Show splash for 4 seconds
+        onSplashComplete()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFF667eea),
+                        Color(0xFF764ba2)
+                    ),
+                    start = Offset(0f, 0f),
+                    end = Offset(1000f, 1000f)
+                )
+            )
+    ) {
+        // Animated background particles
+        AnimatedBackgroundParticles()
+
+        // Main content
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            // App icon with bounce animation
+            AnimatedAppIcon(startAnimation)
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // Main title with gradient animation
+            AnimatedGradientText(
+                text = "Smartwatch for\nChild Safety Project",
+                startAnimation = startAnimation
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Quote positioned right below the main text, aligned to the right
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.End
+            ) {
+                Text(
+                    text = "Every child is a color.",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Light,
+                    color = Color.White.copy(alpha = 0.9f),
+                    fontStyle = FontStyle.Italic,
+                    textAlign = TextAlign.End
+                )
+
+                AnimatedSignature(startAnimation)
+            }
+        }
+
+        // Loading dots at bottom center
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 80.dp)
+        ) {
+            LoadingDots()
+        }
+    }
+}
+
+@Composable
+fun AnimatedAppIcon(startAnimation: Boolean) {
+    val bounceAnimation = rememberInfiniteTransition(label = "bounce")
+    val bounceOffset by bounceAnimation.animateFloat(
+        initialValue = 0f,
+        targetValue = -10f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = EaseInOutQuad),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "bounce_offset"
+    )
+
+    val scaleAnimation by animateFloatAsState(
+        targetValue = if (startAnimation) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "scale"
+    )
+
+    Box(
+        modifier = Modifier
+            .size(120.dp)
+            .offset(y = bounceOffset.dp)
+            .graphicsLayer {
+                scaleX = scaleAnimation
+                scaleY = scaleAnimation
+            }
+            .clip(RoundedCornerShape(30.dp))
+            .background(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.2f),
+                        Color.White.copy(alpha = 0.1f)
+                    )
+                )
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "⌚",
+            fontSize = 60.sp,
+            color = Color.White
+        )
+    }
+}
+
+@Composable
+fun AnimatedGradientText(text: String, startAnimation: Boolean) {
+    val infiniteTransition = rememberInfiniteTransition(label = "gradient")
+    val gradientOffset by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(4000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "gradient_offset"
+    )
+
+    val textAnimation by animateFloatAsState(
+        targetValue = if (startAnimation) 1f else 0f,
+        animationSpec = tween(1000, delayMillis = 500),
+        label = "text_alpha"
+    )
+
+    val textMeasurer = rememberTextMeasurer()
+
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(140.dp)
+            .graphicsLayer { alpha = textAnimation }
+    ) {
+        // Softer, more pastel colors
+        val colors = listOf(
+            Color(0xFFFFB3BA), // Soft pink
+            Color(0xFFFFDFBA), // Soft peach
+            Color(0xFFFFFFBA), // Soft yellow
+            Color(0xFFBAFFBA), // Soft green
+            Color(0xFFBAE1FF), // Soft blue
+            Color(0xFFE1BAFF), // Soft purple
+            Color(0xFFFFBAE1), // Soft magenta
+            Color(0xFFBAFFE1), // Soft mint
+            Color(0xFFE1FFBA), // Soft lime
+            Color(0xFFFFE1BA)  // Soft orange
+        )
+
+        val brush = Brush.linearGradient(
+            colors = colors,
+            start = Offset(size.width * gradientOffset, 0f),
+            end = Offset(size.width * (gradientOffset + 0.3f), size.height)
+        )
+
+        val textStyle = TextStyle(
+            fontSize = 32.sp,
+            fontWeight = FontWeight.ExtraBold,
+            textAlign = TextAlign.Center,
+            brush = brush
+        )
+
+        val textLayoutResult = textMeasurer.measure(
+            text = text,
+            style = textStyle
+        )
+
+        drawText(
+            textLayoutResult = textLayoutResult,
+            topLeft = Offset(
+                (size.width - textLayoutResult.size.width) / 2,
+                (size.height - textLayoutResult.size.height) / 2
+            )
+        )
+    }
+}
+
+@Composable
+fun AnimatedSignature(startAnimation: Boolean) {
+    val signatureAnimation by animateFloatAsState(
+        targetValue = if (startAnimation) 1f else 0f,
+        animationSpec = tween(1000, delayMillis = 2000),
+        label = "signature"
+    )
+
+    Text(
+        text = "~Team",
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Normal,
+        color = Color.White.copy(alpha = 0.7f * signatureAnimation),
+        textAlign = TextAlign.End,
+        modifier = Modifier
+            .padding(top = 8.dp)
+            .graphicsLayer {
+                alpha = signatureAnimation
+                translationY = (1f - signatureAnimation) * 20f
+            }
+    )
+}
+
+@Composable
+fun LoadingDots() {
+    val infiniteTransition = rememberInfiniteTransition(label = "loading")
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        repeat(3) { index ->
+            val scale by infiniteTransition.animateFloat(
+                initialValue = 0.8f,
+                targetValue = 1.2f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(600, delayMillis = index * 200),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "dot_$index"
+            )
+
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                    }
+                    .background(
+                        Color.White.copy(alpha = 0.6f),
+                        shape = androidx.compose.foundation.shape.CircleShape
+                    )
+            )
+        }
+    }
+}
+
+@Composable
+fun AnimatedBackgroundParticles() {
+    val particleCount = 12
+    val infiniteTransition = rememberInfiniteTransition(label = "particles")
+
+    // Create animated values for all particles directly in composable context
+    val particleAnimations = (0 until particleCount).map { index ->
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(
+                    durationMillis = (4000 + index * 500),
+                    easing = LinearEasing
+                ),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "particle_$index"
+        )
+    }
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        particleAnimations.forEachIndexed { index, progressState ->
+            val progress = progressState.value
+            val x = (size.width * (index + 1) / (particleCount + 1))
+            val y = size.height * (1 - progress)
+            val alpha = if (progress < 0.1f || progress > 0.9f) 0f else 0.3f
+
+            drawCircle(
+                color = Color.White.copy(alpha = alpha),
+                radius = 4f,
+                center = Offset(x, y)
+            )
+        }
+    }
+}
 
 class AbnormalResultService : Service() {
 
@@ -474,20 +793,62 @@ fun NotificationCard(item: ResultItem, isUnread: Boolean = false) {
         elevation = CardDefaults.cardElevation(4.dp),
         colors = CardDefaults.cardColors(containerColor = bgColor)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text("Time: ${item.time}", fontWeight = FontWeight.Bold)
-            Text("Age: ${item.age}")
-            Text("Gender: ${item.gender}")
-            Text("Emotion: ${item.emotion}")
-            Text("Result: ${item.result}")
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically // This centers the row content vertically
+        ) {
+            // Main content column
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Time: ${item.time}", fontWeight = FontWeight.Bold)
+                Text("Age: ${item.age}")
+                Text("Gender: ${item.gender}")
+                Text("Emotion: ${item.emotion}")
+                Text("Result: ${item.result}")
+            }
+
+            // Audio icon column - centered both vertically and horizontally
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(start = 8.dp)
+            ) {
+                Icon(
+                    painter = painterResource(id = android.R.drawable.ic_btn_speak_now),
+                    contentDescription = "Play audio",
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Tap to listen",
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    textAlign = TextAlign.Center
+                )
+            }
         }
     }
 }
 
+private var currentMediaPlayer: MediaPlayer? = null
 
 fun playAudioForTimestamp(context: Context, timestamp: String) {
     CoroutineScope(Dispatchers.IO).launch {
         try {
+            // Stop any currently playing audio
+            currentMediaPlayer?.let { player ->
+                if (player.isPlaying) {
+                    player.stop()
+                }
+                player.release()
+                currentMediaPlayer = null
+            }
+
             val url = URL("https://smartwatchforchildsafety-bffrfaahgtahb9bg.italynorth-01.azurewebsites.net/api/smartwatch/audio?timestamp=${URLEncoder.encode(timestamp, "UTF-8")}")
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
@@ -511,9 +872,31 @@ fun playAudioForTimestamp(context: Context, timestamp: String) {
             // Play the audio on the main thread
             withContext(Dispatchers.Main) {
                 val mediaPlayer = MediaPlayer()
+                currentMediaPlayer = mediaPlayer
+
                 mediaPlayer.setDataSource(tempFile.absolutePath)
                 mediaPlayer.prepare()
                 mediaPlayer.start()
+
+                // Clean up when playback completes
+                mediaPlayer.setOnCompletionListener { player ->
+                    player.release()
+                    if (currentMediaPlayer == player) {
+                        currentMediaPlayer = null
+                    }
+                    // Optionally delete the temp file
+                    tempFile.delete()
+                }
+
+                // Handle errors
+                mediaPlayer.setOnErrorListener { player, _, _ ->
+                    player.release()
+                    if (currentMediaPlayer == player) {
+                        currentMediaPlayer = null
+                    }
+                    tempFile.delete()
+                    true
+                }
             }
 
         } catch (e: Exception) {
@@ -524,8 +907,6 @@ fun playAudioForTimestamp(context: Context, timestamp: String) {
         }
     }
 }
-
-
 
 @Composable
 fun ConfigurationPage(navController: NavHostController) {
